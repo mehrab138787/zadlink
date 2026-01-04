@@ -265,18 +265,26 @@ MEDIA_NAMES = {
 
 # --- ساختار منوی اصلی ---
 def get_main_panel_keyboard(settings):
-    """ساخت کیبورد پنل اصلی"""
+    """ساخت کیبورد پنل اصلی با نام‌های کامل و واضح"""
     markup = types.InlineKeyboardMarkup(row_width=2)
     s = settings
     
-    btn1 = types.InlineKeyboardButton(f"پ. سیستم: {'❌' if s['remove_system_msgs'] else '✅'}", callback_data='toggle_sys')
-    btn2 = types.InlineKeyboardButton(f"سکوت لینک: {'✅' if s['mute_on_link'] else '❌'}", callback_data='toggle_mute_link')
-    btn3 = types.InlineKeyboardButton(f"ضد تبچی: {'✅' if s['anti_tabchi_enabled'] else '❌'}", callback_data='toggle_tabchi')
-    btn4 = types.InlineKeyboardButton(f"قفل چت: {'🔒' if s['chat_locked'] else '🔓'}", callback_data='toggle_chat')
+    # دکمه‌های با نام واضح و کامل
+    btn1 = types.InlineKeyboardButton(f"حذف پیام‌های سیستمی (ورود/خروج): {'❌ حذف' if s['remove_system_msgs'] else '✅ نگه داشتن'}", callback_data='toggle_sys')
+    btn2 = types.InlineKeyboardButton(f"اعمال محدودیت بر لینک‌ها: {'✅ فعال' if s['mute_on_link'] else '❌ غیرفعال'}", callback_data='toggle_mute_link')
+    btn3 = types.InlineKeyboardButton(f"فعال‌سازی ضد تبچی/اسپم: {'✅ فعال' if s['anti_tabchi_enabled'] else '❌ غیرفعال'}", callback_data='toggle_tabchi')
+    btn4 = types.InlineKeyboardButton(f"قفل کردن چت (پیام‌ها): {'🔒 قفل' if s['chat_locked'] else '🔓 باز'}", callback_data='toggle_chat')
 
-    btn_media = types.InlineKeyboardButton("📷 تنظیمات رسانه ⬅️", callback_data='show_media_panel')
+    # دکمه‌های فرعی
+    btn_media = types.InlineKeyboardButton("📷 تنظیمات رسانه (عکس، ویدئو و...) ⬅️", callback_data='show_media_panel')
+    btn_welcome = types.InlineKeyboardButton("📝 ویرایش پیام خوش‌آمدگویی", callback_data='edit_welcome_msg')
+    btn_close = types.InlineKeyboardButton("بستن پنل و حذف پیام 🗑️", callback_data='close_panel')
     
-    markup.add(btn1, btn2, btn3, btn4, btn_media)
+    markup.add(btn1, btn2)
+    markup.add(btn3, btn4)
+    markup.add(btn_media)
+    markup.add(btn_welcome)
+    markup.add(btn_close)
     return markup
 
 # --- ساختار منوی رسانه ---
@@ -287,21 +295,81 @@ def get_media_panel_keyboard(settings):
     
     for media_type, name in MEDIA_NAMES.items():
         is_locked = locks.get(media_type, False)
-        # 🟢 مجاز است (قفل نیست) | 🔴 حذف می‌شود (قفل است)
-        emoji = '🔴' if is_locked else '🟢' 
+        # 🔴 حذف می‌شود (قفل است) | 🟢 مجاز است (قفل نیست)
+        emoji = '🔴 حذف می‌شود' if is_locked else '🟢 مجاز است' 
         
-        btn = types.InlineKeyboardButton(f"{emoji} {name}", callback_data=f'toggle_media_{media_type}')
+        btn = types.InlineKeyboardButton(f"{name}: {emoji}", callback_data=f'toggle_media_{media_type}')
         markup.add(btn)
 
     btn_back = types.InlineKeyboardButton("بازگشت به منوی اصلی 🔙", callback_data='show_main_panel')
     markup.add(btn_back)
     return markup
 
+# --- توابع مدیریت ویرایش پیام خوش‌آمدگویی ---
+def send_welcome_editor_prompt(call, settings):
+    """ ارسال پیام برای دریافت متن خوش‌آمدگویی جدید"""
+    current_msg = settings['welcome_msg']
+    
+    prompt_text = (
+        "✍️ **لطفاً متن جدید پیام خوش‌آمدگویی را ارسال کنید.**\n\n"
+        "شما می‌توانید از این متغیرها استفاده کنید:\n"
+        "• `{user_mention}`: برای منشن کردن کاربر جدید\n"
+        "• `{chat_title}`: برای نمایش نام گروه\n\n"
+        "**متن فعلی:**\n"
+        f"```\n{current_msg}\n```\n"
+        "\n_توجه: فقط پیام بعدی شما به عنوان متن خوش‌آمدگویی ذخیره خواهد شد._"
+    )
+    
+    bot.answer_callback_query(call.id, "در حال ورود به حالت ویرایش پیام خوش‌آمدگویی...")
+    
+    # ارسال پیام با ForceReply برای راهنمایی بیشتر
+    sent_msg = bot.send_message(
+        call.message.chat.id, 
+        prompt_text, 
+        parse_mode='Markdown',
+        reply_markup=types.ForceReply(selective=True)
+    )
+    
+    # ثبت هندلر بعدی فقط برای پاسخ این ادمین
+    bot.register_next_step_handler(sent_msg, process_new_welcome_msg)
+    
+    # حذف پنل پس از ورود به حالت ویرایش (طبق درخواست شما)
+    delete_msg(call.message.chat.id, call.message.message_id)
+
+
+def process_new_welcome_msg(message):
+    """ذخیره متن خوش‌آمدگویی جدید ارسال شده توسط ادمین"""
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    
+    # بررسی امنیتی نهایی در هندلر بعدی
+    if not is_admin(chat_id, user_id):
+        return bot.send_message(chat_id, "❌ شما دسترسی ادمین برای تغییر این تنظیمات را ندارید.")
+    
+    new_text = message.text
+    
+    if new_text and new_text.strip():
+        settings = get_settings(chat_id)
+        settings['welcome_msg'] = new_text.strip()
+        save_settings(chat_id, settings)
+        
+        bot.send_message(
+            chat_id, 
+            "✅ **پیام خوش‌آمدگویی جدید با موفقیت ذخیره شد.**\n\n"
+            "برای ادامه مدیریت، می‌توانید مجدداً دستور /panel را ارسال کنید.", 
+            parse_mode='Markdown'
+        )
+        # حذف پیام ادمین که متن جدید را شامل می‌شود
+        delete_msg(chat_id, message.message_id)
+    else:
+        # اگر ادمین هیچ متنی نفرستاد و از فرآیند خارج شد
+        bot.send_message(chat_id, "❌ متن خوش‌آمدگویی خالی است یا دستور ویرایش لغو شد. لطفاً دوباره تلاش کنید.")
+
 
 @bot.message_handler(commands=['panel', 'پنل'])
 def cmd_panel(message):
     """نمایش پنل مدیریتی"""
-    # **شرط امنیتی ادمین فعال شد**
+    # شرط امنیتی ادمین فعال
     if not is_admin(message.chat.id, message.from_user.id): return
     
     settings = get_settings(message.chat.id)
@@ -314,7 +382,7 @@ def callback_handler(call):
     chat_id = call.message.chat.id
     msg_id = call.message.message_id
     
-    # **شرط امنیتی ادمین فعال شد**
+    # شرط امنیتی ادمین فعال
     if not is_admin(chat_id, call.from_user.id):
         return bot.answer_callback_query(call.id, "فقط ادمین می‌تواند تنظیمات را تغییر دهد.")
         
@@ -323,7 +391,7 @@ def callback_handler(call):
     
     # --- مدیریت جابجایی بین منوها ---
     if d == 'show_media_panel':
-        bot.edit_message_text("📷 **تنظیمات قفل رسانه**\n(🔴: حذف می‌شود | 🟢: مجاز است)", chat_id, msg_id, 
+        bot.edit_message_text("📷 **تنظیمات قفل رسانه (عکس، ویدئو و...)**\n\n🟢: مجاز است | 🔴: حذف می‌شود", chat_id, msg_id, 
                               reply_markup=get_media_panel_keyboard(settings), parse_mode='Markdown')
         return bot.answer_callback_query(call.id)
         
@@ -332,12 +400,22 @@ def callback_handler(call):
                               reply_markup=get_main_panel_keyboard(settings), parse_mode='Markdown')
         return bot.answer_callback_query(call.id)
 
-    # --- مدیریت Toggle های منوی اصلی و رسانه ---
+    # --- مدیریت ویرایش پیام خوش‌آمدگویی ---
+    elif d == 'edit_welcome_msg':
+        return send_welcome_editor_prompt(call, settings)
+    
+    # --- مدیریت بستن پنل (حذف پیام پنل) ---
+    elif d == 'close_panel':
+        delete_msg(chat_id, msg_id)
+        return bot.answer_callback_query(call.id, "✅ پنل بسته شد. تغییرات ذخیره شده‌اند.")
+
+    # --- مدیریت Toggle های منوی اصلی ---
     elif d == 'toggle_sys': settings['remove_system_msgs'] = not settings['remove_system_msgs']
     elif d == 'toggle_mute_link': settings['mute_on_link'] = not settings['mute_on_link']
     elif d == 'toggle_chat': settings['chat_locked'] = not settings['chat_locked']
     elif d == 'toggle_tabchi': settings['anti_tabchi_enabled'] = not settings['anti_tabchi_enabled']
     
+    # --- مدیریت Toggle های منوی رسانه ---
     elif d.startswith('toggle_media_'):
         media_type = d.split('_')[-1]
         if media_type in settings['media_locks']:
