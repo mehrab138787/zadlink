@@ -266,7 +266,8 @@ def get_panel_keyboard(settings):
 @bot.message_handler(commands=['panel', 'پنل'])
 def cmd_panel(message):
     """نمایش پنل مدیریتی"""
-    if not is_admin(message.chat.id, message.from_user.id): return
+    # **تغییر موقت برای تست:** شرط ادمین موقتاً غیرفعال شد.
+    # if not is_admin(message.chat.id, message.from_user.id): return
     settings = get_settings(message.chat.id)
     bot.send_message(message.chat.id, "⚙️ **پنل تنظیمات گروه**", reply_markup=get_panel_keyboard(settings), parse_mode='Markdown')
 
@@ -274,6 +275,7 @@ def cmd_panel(message):
 def callback_handler(call):
     """هندلر دکمه‌های شیشه‌ای"""
     chat_id = call.message.chat.id
+    # اگر در حالت تست هستید، این خط را برای تست دکمه‌ها نیز غیرفعال کنید:
     if not is_admin(chat_id, call.from_user.id):
         return bot.answer_callback_query(call.id, "فقط ادمین می‌تواند تنظیمات را تغییر دهد.")
     
