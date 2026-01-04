@@ -151,7 +151,6 @@ def mute_user(chat_id, user_id, duration=3600):
     except Exception as e:
         return False
 
-# تابع اصلی برای بن کردن
 def ban_user_action(chat_id, target_user, admin_id, message_id_to_delete=None):
     """
     بن کردن کاربر هدف. 
@@ -166,7 +165,6 @@ def ban_user_action(chat_id, target_user, admin_id, message_id_to_delete=None):
         # بن کردن دائمی کاربر
         bot.ban_chat_member(chat_id, target_user.id)
         
-        # اگر پیام مرجع حذف شده باشد، از message_id_to_delete استفاده می‌کنیم
         reply_id = message_id_to_delete or None
         
         bot.send_message(chat_id, 
@@ -179,7 +177,6 @@ def ban_user_action(chat_id, target_user, admin_id, message_id_to_delete=None):
                           reply_to_message_id=message_id_to_delete or None)
          return False
 
-# تابع اصلی برای رفع بن
 def unban_user_action(chat_id, target_user, admin_id, message_id_to_delete=None):
     """
     آزادسازی کاربر (رفع بن)
@@ -199,6 +196,21 @@ def unban_user_action(chat_id, target_user, admin_id, message_id_to_delete=None)
          bot.send_message(chat_id, f"❌ خطا: ربات نتوانست کاربر را آزاد کند. (ممکن است دسترسی کافی نداشته باشد.)", 
                           reply_to_message_id=message_id_to_delete or None)
          return False
+
+def cmd_unmute_finalizer(chat_id, target_user, admin_id, message_id_to_reply=None):
+    """آزادسازی سکوت (Unmute) کاربر"""
+    try:
+        bot.restrict_chat_member(
+            chat_id, 
+            target_user.id, 
+            can_send_messages=True, 
+            can_send_media_messages=True
+        )
+        bot.send_message(chat_id, f"✅ کاربر **{target_user.first_name}** با موفقیت از حالت سکوت خارج شد.", 
+                         parse_mode='Markdown', reply_to_message_id=message_id_to_reply)
+    except Exception:
+         bot.send_message(chat_id, "❌ خطا: ربات نتوانست کاربر را آزاد کند.", 
+                          reply_to_message_id=message_id_to_reply)
 
 
 # ************************************************
@@ -229,7 +241,6 @@ def handle_system_msgs(message):
                         threading.Timer(settings['delete_welcome_after'], delete_msg, args=[chat_id, sent.message_id]).start()
                 except Exception: pass
 
-# هندلر عمومی برای فیلترها (فقط پیام‌های عادی و بدون دستور / را پردازش می‌کند)
 @bot.message_handler(func=lambda m: m.text is None or not m.text.startswith('/'), 
                      content_types=['text', 'photo', 'video', 'document', 'sticker', 'audio', 'voice', 'video_note', 'contact', 'location', 'venue', 'poll', 'dice'])
 def handle_content(message):
@@ -238,21 +249,27 @@ def handle_content(message):
     user_id = message.from_user.id
     
     if is_admin(chat_id, user_id): 
-        # **جدید:** بررسی دستورات بدون اسلش برای ادمین (مثل "بن" و "آزادسازی")
+        # بررسی دستورات بدون اسلش برای ادمین (مثل "بن" و "رفع بن")
         text_lower = (message.text or "").lower().strip()
         if message.reply_to_message:
             target_user = message.reply_to_message.from_user
+            
+            # --- دستور بن ---
             if text_lower in ['بن', 'ban']:
                 delete_msg(chat_id, message.message_id)
                 ban_user_action(chat_id, target_user, user_id, message.reply_to_message.message_id)
                 return
-            if text_lower in ['آزادسازی', 'unmute', 'unban']:
+            
+            # --- دستور رفع بن ---
+            if text_lower in ['رفع بن', 'unban']:
                 delete_msg(chat_id, message.message_id)
-                # دستور unban و unmute را جداگانه مدیریت می‌کنیم
-                if text_lower in ['unmute', 'آزادسازی']:
-                    cmd_unmute(message) # از تابع مربوط به unmute استفاده می‌کنیم
-                else:
-                    unban_user_action(chat_id, target_user, user_id, message.reply_to_message.message_id)
+                unban_user_action(chat_id, target_user, user_id, message.reply_to_message.message_id)
+                return
+
+            # --- دستور آزادسازی سکوت ---
+            if text_lower in ['آزادسازی', 'unmute']:
+                delete_msg(chat_id, message.message_id)
+                cmd_unmute_finalizer(chat_id, target_user, user_id, message.reply_to_message.message_id)
                 return
         
         return # ادمین‌ها از فیلترها معاف هستند
@@ -330,7 +347,6 @@ MEDIA_NAMES = {
     'video_note': '🎥 ویدئو نوت',
 }
 
-# --- ساختار منوی اصلی (ساده شده) ---
 def get_main_panel_keyboard(settings):
     """ساخت کیبورد پنل اصلی با ساختار ساده و تک صفحه‌ای"""
     markup = types.InlineKeyboardMarkup(row_width=2)
@@ -351,8 +367,7 @@ def get_main_panel_keyboard(settings):
     btn_media = types.InlineKeyboardButton("📷 تنظیمات قفل رسانه ⬅️", callback_data='show_media_panel')
     markup.add(btn_welcome, btn_media)
     
-    # **جدید:** ردیف ۴: دکمه‌های مدیریتی (بن، آزادسازی)
-    # این دکمه‌ها برای مدیریت کاربران از طریق ریپلای هستند
+    # ردیف ۴: دکمه‌های مدیریتی (بن، آزادسازی)
     btn_unban = types.InlineKeyboardButton("آزادسازی کاربر (Unban) 🔓", callback_data='start_unban_process')
     btn_unmute = types.InlineKeyboardButton("آزادسازی سکوت (Unmute) 🗣️", callback_data='start_unmute_process')
     markup.add(btn_unban, btn_unmute)
@@ -363,7 +378,6 @@ def get_main_panel_keyboard(settings):
     markup.add(btn_close)
     return markup
 
-# --- ساختار منوی رسانه ---
 def get_media_panel_keyboard(settings):
     """ساخت کیبورد پنل تنظیمات رسانه"""
     markup = types.InlineKeyboardMarkup(row_width=2)
@@ -380,7 +394,6 @@ def get_media_panel_keyboard(settings):
     markup.add(btn_back)
     return markup
 
-# --- توابع مدیریت ویرایش پیام خوش‌آمدگویی ---
 def send_welcome_editor_prompt(call, settings):
     """ ارسال پیام برای دریافت متن خوش‌آمدگویی جدید"""
     current_msg = settings['welcome_msg']
@@ -440,17 +453,14 @@ def process_new_welcome_msg(message):
     else:
         bot.send_message(chat_id, "❌ متن خوش‌آمدگویی خالی است یا دستور ویرایش لغو شد. لطفاً دوباره تلاش کنید.")
 
-
-# --- توابع مدیریت دکمه‌های Unban/Unmute از پنل ---
-
 def start_management_process(call, action_type):
     """شروع فرآیند مدیریت (Unban/Unmute) از طریق پنل"""
     
     if action_type == 'unban':
-        prompt_text = "🔓 **برای آزادسازی (Unban) کاربر از لیست سیاه، روی پیام او ریپلای کنید و سپس دکمه را بزنید.**"
+        prompt_text = "🔓 **برای آزادسازی (Unban) کاربر از لیست سیاه، روی پیام او ریپلای کنید و سپس دکمه زیر را بزنید.**"
         callback_prefix = 'finalize_unban'
     else: # unmute
-        prompt_text = "🗣️ **برای آزادسازی سکوت (Unmute) کاربر، روی پیام او ریپلای کنید و سپس دکمه را بزنید.**"
+        prompt_text = "🗣️ **برای آزادسازی سکوت (Unmute) کاربر، روی پیام او ریپلای کنید و سپس دکمه زیر را بزنید.**"
         callback_prefix = 'finalize_unmute'
 
     markup = types.InlineKeyboardMarkup()
@@ -462,15 +472,12 @@ def start_management_process(call, action_type):
     # حذف پنل اصلی و نمایش دکمه تایید
     delete_msg(call.message.chat.id, call.message.message_id)
     
-    sent_msg = bot.send_message(
+    bot.send_message(
         call.message.chat.id,
         prompt_text,
         parse_mode='Markdown',
         reply_markup=markup
     )
-    
-    # ذخیره پیام فرآیند در حافظه موقت (اختیاری، اما اینجا برای ساده‌سازی روی دکمه انجام می‌شود)
-    # و نیازی به register_next_step_handler نیست.
 
 
 @bot.message_handler(commands=['panel', 'پنل'])
@@ -509,17 +516,16 @@ def callback_handler(call):
     elif d == 'edit_welcome_msg':
         return send_welcome_editor_prompt(call, settings)
     
-    # **جدید:** شروع فرآیند مدیریتی از پنل
+    # شروع فرآیند مدیریتی از پنل
     elif d == 'start_unban_process':
         return start_management_process(call, 'unban')
         
     elif d == 'start_unmute_process':
         return start_management_process(call, 'unmute')
 
-    # **جدید:** نهایی کردن فرآیند مدیریتی (پس از ریپلای)
+    # نهایی کردن فرآیند مدیریتی (پس از ریپلای)
     elif d in ['finalize_unban', 'finalize_unmute']:
         
-        # پیام ریپلای شده باید وجود داشته باشد (از خود تلگرام می‌گیریم)
         replied_message = call.message.reply_to_message
         
         if not replied_message:
@@ -532,10 +538,9 @@ def callback_handler(call):
         else: # finalize_unmute
             cmd_unmute_finalizer(chat_id, target_user, call.from_user.id, call.message.message_id)
             
-        # پیام فرآیند مدیریتی را حذف می‌کنیم تا گروه شلوغ نشود
         delete_msg(chat_id, call.message.message_id) 
         
-        return bot.answer_callback_query(call.id)
+        return bot.answer_callback_query(call.id, "✅ عملیات با موفقیت انجام شد.")
 
     # --- مدیریت بستن پنل (حذف پیام پنل) ---
     elif d == 'close_panel':
@@ -594,21 +599,6 @@ def cmd_mute(message):
     else:
          bot.reply_to(message, "❌ خطا: ربات دسترسی محدودسازی ندارد.")
 
-# تابع کمکی برای آزادسازی سکوت
-def cmd_unmute_finalizer(chat_id, target_user, admin_id, message_id_to_reply=None):
-    """آزادسازی سکوت (Unmute) کاربر"""
-    try:
-        bot.restrict_chat_member(
-            chat_id, 
-            target_user.id, 
-            can_send_messages=True, 
-            can_send_media_messages=True
-        )
-        bot.send_message(chat_id, f"✅ کاربر **{target_user.first_name}** با موفقیت از حالت سکوت خارج شد.", 
-                         parse_mode='Markdown', reply_to_message_id=message_id_to_reply)
-    except Exception:
-         bot.send_message(chat_id, "❌ خطا: ربات نتوانست کاربر را آزاد کند.", 
-                          reply_to_message_id=message_id_to_reply)
 
 @bot.message_handler(commands=['unmute', 'آزادسازی'])
 def cmd_unmute(message):
