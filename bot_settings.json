@@ -1,0 +1,12 @@
+{
+    "6691915596": {
+        "welcome_msg": "👋 سلام {user_mention} عزیز، به گروه **{chat_title}** خوش اومدی! قوانین رو بخون.",
+        "remove_system_msgs": true,
+        "mute_on_link": false
+    },
+    "-1003478147580": {
+        "welcome_msg": "👋 سلام {user_mention} عزیز، به گروه **{chat_title}** خوش اومدی! قوانین رو بخون.",
+        "remove_system_msgs": true,
+        "mute_on_link": false
+    }
+}
