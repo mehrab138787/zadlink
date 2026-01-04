@@ -88,7 +88,6 @@ def get_settings(chat_id):
 
     if result:
         final_settings = DEFAULT_SETTINGS.copy()
-        # Migration: تبدیل قفل رسانه قدیمی به ساختار جدید
         if 'media_locked' in result['settings']:
             is_locked = result['settings'].pop('media_locked')
             if is_locked and 'media_locks' not in result['settings']:
@@ -263,27 +262,29 @@ MEDIA_NAMES = {
     'video_note': '🎥 ویدئو نوت',
 }
 
-# --- ساختار منوی اصلی ---
+# --- ساختار منوی اصلی (ساده شده) ---
 def get_main_panel_keyboard(settings):
-    """ساخت کیبورد پنل اصلی با نام‌های کامل و واضح"""
+    """ساخت کیبورد پنل اصلی با ساختار ساده و تک صفحه‌ای"""
     markup = types.InlineKeyboardMarkup(row_width=2)
     s = settings
     
-    # دکمه‌های با نام واضح و کامل
-    btn1 = types.InlineKeyboardButton(f"حذف پیام‌های سیستمی (ورود/خروج): {'❌ حذف' if s['remove_system_msgs'] else '✅ نگه داشتن'}", callback_data='toggle_sys')
-    btn2 = types.InlineKeyboardButton(f"اعمال محدودیت بر لینک‌ها: {'✅ فعال' if s['mute_on_link'] else '❌ غیرفعال'}", callback_data='toggle_mute_link')
-    btn3 = types.InlineKeyboardButton(f"فعال‌سازی ضد تبچی/اسپم: {'✅ فعال' if s['anti_tabchi_enabled'] else '❌ غیرفعال'}", callback_data='toggle_tabchi')
-    btn4 = types.InlineKeyboardButton(f"قفل کردن چت (پیام‌ها): {'🔒 قفل' if s['chat_locked'] else '🔓 باز'}", callback_data='toggle_chat')
+    # ردیف ۱: قفل‌های عمومی
+    btn_chat_lock = types.InlineKeyboardButton(f"🔒 قفل چت: {'فعال' if s['chat_locked'] else 'غیرفعال'}", callback_data='toggle_chat')
+    btn_anti_tabchi = types.InlineKeyboardButton(f"🤖 ضد اسپم/تبچی: {'فعال' if s['anti_tabchi_enabled'] else 'غیرفعال'}", callback_data='toggle_tabchi')
+    markup.add(btn_chat_lock, btn_anti_tabchi)
 
-    # دکمه‌های فرعی
-    btn_media = types.InlineKeyboardButton("📷 تنظیمات رسانه (عکس، ویدئو و...) ⬅️", callback_data='show_media_panel')
-    btn_welcome = types.InlineKeyboardButton("📝 ویرایش پیام خوش‌آمدگویی", callback_data='edit_welcome_msg')
-    btn_close = types.InlineKeyboardButton("بستن پنل و حذف پیام 🗑️", callback_data='close_panel')
+    # ردیف ۲: تنظیمات لینک و پیام سیستمی
+    btn_link = types.InlineKeyboardButton(f"🔗 محدودیت لینک: {'سکوت (Mute)' if s['mute_on_link'] else 'فقط حذف'}", callback_data='toggle_mute_link')
+    btn_sys = types.InlineKeyboardButton(f"🗑️ حذف ورود/خروج: {'فعال' if s['remove_system_msgs'] else 'غیرفعال'}", callback_data='toggle_sys')
+    markup.add(btn_link, btn_sys)
     
-    markup.add(btn1, btn2)
-    markup.add(btn3, btn4)
-    markup.add(btn_media)
-    markup.add(btn_welcome)
+    # ردیف ۳: تنظیمات خوش‌آمدگویی
+    btn_welcome = types.InlineKeyboardButton("📝 ویرایش متن خوش‌آمدگویی", callback_data='edit_welcome_msg')
+    btn_media = types.InlineKeyboardButton("📷 تنظیمات قفل رسانه ⬅️", callback_data='show_media_panel')
+    markup.add(btn_welcome, btn_media)
+
+    # ردیف ۴: بستن پنل
+    btn_close = types.InlineKeyboardButton("بستن پنل و حذف پیام 🗑️", callback_data='close_panel')
     markup.add(btn_close)
     return markup
 
@@ -301,7 +302,7 @@ def get_media_panel_keyboard(settings):
         btn = types.InlineKeyboardButton(f"{name}: {emoji}", callback_data=f'toggle_media_{media_type}')
         markup.add(btn)
 
-    btn_back = types.InlineKeyboardButton("بازگشت به منوی اصلی 🔙", callback_data='show_main_panel')
+    btn_back = types.InlineKeyboardButton("بازگشت به پنل اصلی 🔙", callback_data='show_main_panel')
     markup.add(btn_back)
     return markup
 
@@ -312,7 +313,7 @@ def send_welcome_editor_prompt(call, settings):
     
     prompt_text = (
         "✍️ **لطفاً متن جدید پیام خوش‌آمدگویی را ارسال کنید.**\n\n"
-        "شما می‌توانید از این متغیرها استفاده کنید:\n"
+        "تگ‌های **اجباری**:\n"
         "• `{user_mention}`: برای منشن کردن کاربر جدید\n"
         "• `{chat_title}`: برای نمایش نام گروه\n\n"
         "**متن فعلی:**\n"
@@ -322,7 +323,6 @@ def send_welcome_editor_prompt(call, settings):
     
     bot.answer_callback_query(call.id, "در حال ورود به حالت ویرایش پیام خوش‌آمدگویی...")
     
-    # ارسال پیام با ForceReply برای راهنمایی بیشتر
     sent_msg = bot.send_message(
         call.message.chat.id, 
         prompt_text, 
@@ -330,10 +330,8 @@ def send_welcome_editor_prompt(call, settings):
         reply_markup=types.ForceReply(selective=True)
     )
     
-    # ثبت هندلر بعدی فقط برای پاسخ این ادمین
     bot.register_next_step_handler(sent_msg, process_new_welcome_msg)
     
-    # حذف پنل پس از ورود به حالت ویرایش (طبق درخواست شما)
     delete_msg(call.message.chat.id, call.message.message_id)
 
 
@@ -342,15 +340,21 @@ def process_new_welcome_msg(message):
     chat_id = message.chat.id
     user_id = message.from_user.id
     
-    # بررسی امنیتی نهایی در هندلر بعدی
     if not is_admin(chat_id, user_id):
         return bot.send_message(chat_id, "❌ شما دسترسی ادمین برای تغییر این تنظیمات را ندارید.")
     
     new_text = message.text
     
     if new_text and new_text.strip():
+        new_text_to_save = new_text.strip()
+        
+        # **تضمین وجود {user_mention} (اجباری)**
+        if '{user_mention}' not in new_text_to_save:
+            bot.send_message(chat_id, "⚠️ **تگ `{user_mention}` برای منشن کاربر الزامی است!** این تگ به انتهای پیام شما اضافه شد. لطفا دفعه بعد آن را در متن دلخواه خود قرار دهید.", parse_mode='Markdown')
+            new_text_to_save = f"{new_text_to_save} {{user_mention}}"
+            
         settings = get_settings(chat_id)
-        settings['welcome_msg'] = new_text.strip()
+        settings['welcome_msg'] = new_text_to_save
         save_settings(chat_id, settings)
         
         bot.send_message(
@@ -359,17 +363,14 @@ def process_new_welcome_msg(message):
             "برای ادامه مدیریت، می‌توانید مجدداً دستور /panel را ارسال کنید.", 
             parse_mode='Markdown'
         )
-        # حذف پیام ادمین که متن جدید را شامل می‌شود
         delete_msg(chat_id, message.message_id)
     else:
-        # اگر ادمین هیچ متنی نفرستاد و از فرآیند خارج شد
         bot.send_message(chat_id, "❌ متن خوش‌آمدگویی خالی است یا دستور ویرایش لغو شد. لطفاً دوباره تلاش کنید.")
 
 
 @bot.message_handler(commands=['panel', 'پنل'])
 def cmd_panel(message):
     """نمایش پنل مدیریتی"""
-    # شرط امنیتی ادمین فعال
     if not is_admin(message.chat.id, message.from_user.id): return
     
     settings = get_settings(message.chat.id)
@@ -382,7 +383,6 @@ def callback_handler(call):
     chat_id = call.message.chat.id
     msg_id = call.message.message_id
     
-    # شرط امنیتی ادمین فعال
     if not is_admin(chat_id, call.from_user.id):
         return bot.answer_callback_query(call.id, "فقط ادمین می‌تواند تنظیمات را تغییر دهد.")
         
@@ -396,6 +396,7 @@ def callback_handler(call):
         return bot.answer_callback_query(call.id)
         
     elif d == 'show_main_panel':
+        # هنگام بازگشت به پنل اصلی، مطمئن می‌شویم محتوای پیام (تکست) هم به‌روزرسانی شود.
         bot.edit_message_text("⚙️ **پنل اصلی تنظیمات گروه**", chat_id, msg_id, 
                               reply_markup=get_main_panel_keyboard(settings), parse_mode='Markdown')
         return bot.answer_callback_query(call.id)
@@ -409,7 +410,7 @@ def callback_handler(call):
         delete_msg(chat_id, msg_id)
         return bot.answer_callback_query(call.id, "✅ پنل بسته شد. تغییرات ذخیره شده‌اند.")
 
-    # --- مدیریت Toggle های منوی اصلی ---
+    # --- مدیریت Toggle های منوی اصلی (همه در یک صفحه) ---
     elif d == 'toggle_sys': settings['remove_system_msgs'] = not settings['remove_system_msgs']
     elif d == 'toggle_mute_link': settings['mute_on_link'] = not settings['mute_on_link']
     elif d == 'toggle_chat': settings['chat_locked'] = not settings['chat_locked']
@@ -421,6 +422,7 @@ def callback_handler(call):
         if media_type in settings['media_locks']:
             settings['media_locks'][media_type] = not settings['media_locks'][media_type]
             save_settings(chat_id, settings)
+            # فقط ریپلی مارک‌آپ بخش رسانه را آپدیت می‌کنیم
             bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=get_media_panel_keyboard(settings))
             return bot.answer_callback_query(call.id, "✅ تنظیمات رسانه با موفقیت ذخیره شد.")
         else:
@@ -428,7 +430,9 @@ def callback_handler(call):
 
     # ذخیره و به‌روزرسانی پنل اصلی
     save_settings(chat_id, settings)
-    bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=get_main_panel_keyboard(settings))
+    # تغییر نام دکمه‌ها در پنل اصلی، نیاز به ویرایش کل پیام دارد
+    bot.edit_message_text("⚙️ **پنل اصلی تنظیمات گروه**", chat_id, msg_id, 
+                          reply_markup=get_main_panel_keyboard(settings), parse_mode='Markdown')
     bot.answer_callback_query(call.id, "✅ تنظیمات با موفقیت ذخیره شد.")
     
 @bot.message_handler(commands=['clean', 'پاکسازی'])
@@ -446,6 +450,7 @@ def cmd_clean(message):
     
     sent = bot.send_message(message.chat.id, f"🗑️ **{count}** پیام آخر حذف شد.", parse_mode='Markdown')
     threading.Timer(5, delete_msg, args=[message.chat.id, sent.message_id]).start()
+
 
 @bot.message_handler(commands=['mute', 'سکوت'])
 def cmd_mute(message):
@@ -476,6 +481,31 @@ def cmd_unmute(message):
         bot.reply_to(message, f"✅ کاربر **{target_user.first_name}** با موفقیت آزاد شد.", parse_mode='Markdown')
     except Exception:
          bot.reply_to(message, "❌ خطا: ربات نتوانست کاربر را آزاد کند.")
+
+
+@bot.message_handler(commands=['ban', 'بن'])
+def cmd_ban(message):
+    """بن کردن دائمی کاربر با ریپلای (حفاظت از ادمین)"""
+    chat_id = message.chat.id
+    
+    if not is_admin(chat_id, message.from_user.id): return
+    
+    if not message.reply_to_message: 
+        return bot.reply_to(message, "⚠️ **برای استفاده از دستور `/بن`، باید روی پیام کاربر مورد نظر ریپلای کنید.**", parse_mode='Markdown')
+        
+    target_user = message.reply_to_message.from_user
+    
+    # حفاظت از ادمین (Admin Protection)
+    if is_admin(chat_id, target_user.id):
+        return bot.reply_to(message, "❌ **شما نمی‌توانید یک مدیر گروه را بن کنید!**", parse_mode='Markdown')
+        
+    try:
+        # بن کردن دائمی کاربر
+        bot.ban_chat_member(chat_id, target_user.id)
+        bot.reply_to(message, f"🚫 کاربر **{target_user.first_name}** ({target_user.id}) با موفقیت از گروه **بن (اخراج دائم)** شد.", parse_mode='Markdown')
+        delete_msg(chat_id, message.message_id)
+    except Exception as e:
+         bot.reply_to(message, f"❌ خطا: ربات نتوانست کاربر را بن کند. (ممکن است دسترسی کافی نداشته باشد. {e})")
 
 
 # ************************************************
