@@ -151,6 +151,56 @@ def mute_user(chat_id, user_id, duration=3600):
     except Exception as e:
         return False
 
+# تابع اصلی برای بن کردن
+def ban_user_action(chat_id, target_user, admin_id, message_id_to_delete=None):
+    """
+    بن کردن کاربر هدف. 
+    اگر target_user مدیر باشد، جلوگیری می‌کند.
+    """
+    if is_admin(chat_id, target_user.id):
+        return bot.send_message(chat_id, "❌ **شما نمی‌توانید یک مدیر گروه را بن کنید!**", 
+                                reply_to_message_id=message_id_to_delete or None, 
+                                parse_mode='Markdown')
+        
+    try:
+        # بن کردن دائمی کاربر
+        bot.ban_chat_member(chat_id, target_user.id)
+        
+        # اگر پیام مرجع حذف شده باشد، از message_id_to_delete استفاده می‌کنیم
+        reply_id = message_id_to_delete or None
+        
+        bot.send_message(chat_id, 
+                         f"🚫 کاربر **{target_user.first_name}** ({target_user.id}) با موفقیت از گروه **بن (اخراج دائم)** شد.", 
+                         parse_mode='Markdown', 
+                         reply_to_message_id=reply_id)
+        return True
+    except Exception as e:
+         bot.send_message(chat_id, f"❌ خطا: ربات نتوانست کاربر را بن کند. (ممکن است دسترسی کافی نداشته باشد.)", 
+                          reply_to_message_id=message_id_to_delete or None)
+         return False
+
+# تابع اصلی برای رفع بن
+def unban_user_action(chat_id, target_user, admin_id, message_id_to_delete=None):
+    """
+    آزادسازی کاربر (رفع بن)
+    """
+    try:
+        # Unban کردن کاربر
+        bot.unban_chat_member(chat_id, target_user.id)
+        
+        reply_id = message_id_to_delete or None
+        
+        bot.send_message(chat_id, 
+                         f"✅ کاربر **{target_user.first_name}** ({target_user.id}) با موفقیت از لیست سیاه **آزاد (Unban)** شد.", 
+                         parse_mode='Markdown',
+                         reply_to_message_id=reply_id)
+        return True
+    except Exception as e:
+         bot.send_message(chat_id, f"❌ خطا: ربات نتوانست کاربر را آزاد کند. (ممکن است دسترسی کافی نداشته باشد.)", 
+                          reply_to_message_id=message_id_to_delete or None)
+         return False
+
+
 # ************************************************
 # هندلرها و فیلترها
 # ************************************************
@@ -187,7 +237,25 @@ def handle_content(message):
     chat_id = message.chat.id
     user_id = message.from_user.id
     
-    if is_admin(chat_id, user_id): return
+    if is_admin(chat_id, user_id): 
+        # **جدید:** بررسی دستورات بدون اسلش برای ادمین (مثل "بن" و "آزادسازی")
+        text_lower = (message.text or "").lower().strip()
+        if message.reply_to_message:
+            target_user = message.reply_to_message.from_user
+            if text_lower in ['بن', 'ban']:
+                delete_msg(chat_id, message.message_id)
+                ban_user_action(chat_id, target_user, user_id, message.reply_to_message.message_id)
+                return
+            if text_lower in ['آزادسازی', 'unmute', 'unban']:
+                delete_msg(chat_id, message.message_id)
+                # دستور unban و unmute را جداگانه مدیریت می‌کنیم
+                if text_lower in ['unmute', 'آزادسازی']:
+                    cmd_unmute(message) # از تابع مربوط به unmute استفاده می‌کنیم
+                else:
+                    unban_user_action(chat_id, target_user, user_id, message.reply_to_message.message_id)
+                return
+        
+        return # ادمین‌ها از فیلترها معاف هستند
 
     settings = get_settings(chat_id)
 
@@ -278,12 +346,19 @@ def get_main_panel_keyboard(settings):
     btn_sys = types.InlineKeyboardButton(f"🗑️ حذف ورود/خروج: {'فعال' if s['remove_system_msgs'] else 'غیرفعال'}", callback_data='toggle_sys')
     markup.add(btn_link, btn_sys)
     
-    # ردیف ۳: تنظیمات خوش‌آمدگویی
+    # ردیف ۳: تنظیمات خوش‌آمدگویی و رسانه
     btn_welcome = types.InlineKeyboardButton("📝 ویرایش متن خوش‌آمدگویی", callback_data='edit_welcome_msg')
     btn_media = types.InlineKeyboardButton("📷 تنظیمات قفل رسانه ⬅️", callback_data='show_media_panel')
     markup.add(btn_welcome, btn_media)
+    
+    # **جدید:** ردیف ۴: دکمه‌های مدیریتی (بن، آزادسازی)
+    # این دکمه‌ها برای مدیریت کاربران از طریق ریپلای هستند
+    btn_unban = types.InlineKeyboardButton("آزادسازی کاربر (Unban) 🔓", callback_data='start_unban_process')
+    btn_unmute = types.InlineKeyboardButton("آزادسازی سکوت (Unmute) 🗣️", callback_data='start_unmute_process')
+    markup.add(btn_unban, btn_unmute)
 
-    # ردیف ۴: بستن پنل
+
+    # ردیف آخر: بستن پنل
     btn_close = types.InlineKeyboardButton("بستن پنل و حذف پیام 🗑️", callback_data='close_panel')
     markup.add(btn_close)
     return markup
@@ -296,7 +371,6 @@ def get_media_panel_keyboard(settings):
     
     for media_type, name in MEDIA_NAMES.items():
         is_locked = locks.get(media_type, False)
-        # 🔴 حذف می‌شود (قفل است) | 🟢 مجاز است (قفل نیست)
         emoji = '🔴 حذف می‌شود' if is_locked else '🟢 مجاز است' 
         
         btn = types.InlineKeyboardButton(f"{name}: {emoji}", callback_data=f'toggle_media_{media_type}')
@@ -348,7 +422,6 @@ def process_new_welcome_msg(message):
     if new_text and new_text.strip():
         new_text_to_save = new_text.strip()
         
-        # **تضمین وجود {user_mention} (اجباری)**
         if '{user_mention}' not in new_text_to_save:
             bot.send_message(chat_id, "⚠️ **تگ `{user_mention}` برای منشن کاربر الزامی است!** این تگ به انتهای پیام شما اضافه شد. لطفا دفعه بعد آن را در متن دلخواه خود قرار دهید.", parse_mode='Markdown')
             new_text_to_save = f"{new_text_to_save} {{user_mention}}"
@@ -366,6 +439,38 @@ def process_new_welcome_msg(message):
         delete_msg(chat_id, message.message_id)
     else:
         bot.send_message(chat_id, "❌ متن خوش‌آمدگویی خالی است یا دستور ویرایش لغو شد. لطفاً دوباره تلاش کنید.")
+
+
+# --- توابع مدیریت دکمه‌های Unban/Unmute از پنل ---
+
+def start_management_process(call, action_type):
+    """شروع فرآیند مدیریت (Unban/Unmute) از طریق پنل"""
+    
+    if action_type == 'unban':
+        prompt_text = "🔓 **برای آزادسازی (Unban) کاربر از لیست سیاه، روی پیام او ریپلای کنید و سپس دکمه را بزنید.**"
+        callback_prefix = 'finalize_unban'
+    else: # unmute
+        prompt_text = "🗣️ **برای آزادسازی سکوت (Unmute) کاربر، روی پیام او ریپلای کنید و سپس دکمه را بزنید.**"
+        callback_prefix = 'finalize_unmute'
+
+    markup = types.InlineKeyboardMarkup()
+    btn = types.InlineKeyboardButton("☑️ کاربر را آزاد کن (بعد از ریپلای)", callback_data=callback_prefix)
+    markup.add(btn)
+    
+    bot.answer_callback_query(call.id, f"در حال آماده‌سازی فرآیند {action_type}...")
+    
+    # حذف پنل اصلی و نمایش دکمه تایید
+    delete_msg(call.message.chat.id, call.message.message_id)
+    
+    sent_msg = bot.send_message(
+        call.message.chat.id,
+        prompt_text,
+        parse_mode='Markdown',
+        reply_markup=markup
+    )
+    
+    # ذخیره پیام فرآیند در حافظه موقت (اختیاری، اما اینجا برای ساده‌سازی روی دکمه انجام می‌شود)
+    # و نیازی به register_next_step_handler نیست.
 
 
 @bot.message_handler(commands=['panel', 'پنل'])
@@ -396,7 +501,6 @@ def callback_handler(call):
         return bot.answer_callback_query(call.id)
         
     elif d == 'show_main_panel':
-        # هنگام بازگشت به پنل اصلی، مطمئن می‌شویم محتوای پیام (تکست) هم به‌روزرسانی شود.
         bot.edit_message_text("⚙️ **پنل اصلی تنظیمات گروه**", chat_id, msg_id, 
                               reply_markup=get_main_panel_keyboard(settings), parse_mode='Markdown')
         return bot.answer_callback_query(call.id)
@@ -405,6 +509,34 @@ def callback_handler(call):
     elif d == 'edit_welcome_msg':
         return send_welcome_editor_prompt(call, settings)
     
+    # **جدید:** شروع فرآیند مدیریتی از پنل
+    elif d == 'start_unban_process':
+        return start_management_process(call, 'unban')
+        
+    elif d == 'start_unmute_process':
+        return start_management_process(call, 'unmute')
+
+    # **جدید:** نهایی کردن فرآیند مدیریتی (پس از ریپلای)
+    elif d in ['finalize_unban', 'finalize_unmute']:
+        
+        # پیام ریپلای شده باید وجود داشته باشد (از خود تلگرام می‌گیریم)
+        replied_message = call.message.reply_to_message
+        
+        if not replied_message:
+            return bot.answer_callback_query(call.id, "❌ ابتدا باید روی پیام کاربر مورد نظر ریپلای کنید!")
+
+        target_user = replied_message.from_user
+        
+        if d == 'finalize_unban':
+            unban_user_action(chat_id, target_user, call.from_user.id, call.message.message_id)
+        else: # finalize_unmute
+            cmd_unmute_finalizer(chat_id, target_user, call.from_user.id, call.message.message_id)
+            
+        # پیام فرآیند مدیریتی را حذف می‌کنیم تا گروه شلوغ نشود
+        delete_msg(chat_id, call.message.message_id) 
+        
+        return bot.answer_callback_query(call.id)
+
     # --- مدیریت بستن پنل (حذف پیام پنل) ---
     elif d == 'close_panel':
         delete_msg(chat_id, msg_id)
@@ -422,7 +554,6 @@ def callback_handler(call):
         if media_type in settings['media_locks']:
             settings['media_locks'][media_type] = not settings['media_locks'][media_type]
             save_settings(chat_id, settings)
-            # فقط ریپلی مارک‌آپ بخش رسانه را آپدیت می‌کنیم
             bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=get_media_panel_keyboard(settings))
             return bot.answer_callback_query(call.id, "✅ تنظیمات رسانه با موفقیت ذخیره شد.")
         else:
@@ -430,7 +561,6 @@ def callback_handler(call):
 
     # ذخیره و به‌روزرسانی پنل اصلی
     save_settings(chat_id, settings)
-    # تغییر نام دکمه‌ها در پنل اصلی، نیاز به ویرایش کل پیام دارد
     bot.edit_message_text("⚙️ **پنل اصلی تنظیمات گروه**", chat_id, msg_id, 
                           reply_markup=get_main_panel_keyboard(settings), parse_mode='Markdown')
     bot.answer_callback_query(call.id, "✅ تنظیمات با موفقیت ذخیره شد.")
@@ -464,28 +594,33 @@ def cmd_mute(message):
     else:
          bot.reply_to(message, "❌ خطا: ربات دسترسی محدودسازی ندارد.")
 
-
-@bot.message_handler(commands=['unmute', 'آزادسازی'])
-def cmd_unmute(message):
-    """آزادسازی کاربر با ریپلای"""
-    if not is_admin(message.chat.id, message.from_user.id) or not message.reply_to_message: return
-    target_user = message.reply_to_message.from_user
-    
+# تابع کمکی برای آزادسازی سکوت
+def cmd_unmute_finalizer(chat_id, target_user, admin_id, message_id_to_reply=None):
+    """آزادسازی سکوت (Unmute) کاربر"""
     try:
         bot.restrict_chat_member(
-            message.chat.id, 
+            chat_id, 
             target_user.id, 
             can_send_messages=True, 
             can_send_media_messages=True
         )
-        bot.reply_to(message, f"✅ کاربر **{target_user.first_name}** با موفقیت آزاد شد.", parse_mode='Markdown')
+        bot.send_message(chat_id, f"✅ کاربر **{target_user.first_name}** با موفقیت از حالت سکوت خارج شد.", 
+                         parse_mode='Markdown', reply_to_message_id=message_id_to_reply)
     except Exception:
-         bot.reply_to(message, "❌ خطا: ربات نتوانست کاربر را آزاد کند.")
+         bot.send_message(chat_id, "❌ خطا: ربات نتوانست کاربر را آزاد کند.", 
+                          reply_to_message_id=message_id_to_reply)
+
+@bot.message_handler(commands=['unmute', 'آزادسازی'])
+def cmd_unmute(message):
+    """آزادسازی کاربر با ریپلای (دستور)"""
+    if not is_admin(message.chat.id, message.from_user.id) or not message.reply_to_message: return
+    target_user = message.reply_to_message.from_user
+    cmd_unmute_finalizer(message.chat.id, target_user, message.from_user.id, message.message_id)
 
 
 @bot.message_handler(commands=['ban', 'بن'])
 def cmd_ban(message):
-    """بن کردن دائمی کاربر با ریپلای (حفاظت از ادمین)"""
+    """بن کردن دائمی کاربر با ریپلای (دستور)"""
     chat_id = message.chat.id
     
     if not is_admin(chat_id, message.from_user.id): return
@@ -494,18 +629,25 @@ def cmd_ban(message):
         return bot.reply_to(message, "⚠️ **برای استفاده از دستور `/بن`، باید روی پیام کاربر مورد نظر ریپلای کنید.**", parse_mode='Markdown')
         
     target_user = message.reply_to_message.from_user
+    delete_msg(chat_id, message.message_id) # حذف دستور
     
-    # حفاظت از ادمین (Admin Protection)
-    if is_admin(chat_id, target_user.id):
-        return bot.reply_to(message, "❌ **شما نمی‌توانید یک مدیر گروه را بن کنید!**", parse_mode='Markdown')
+    ban_user_action(chat_id, target_user, message.from_user.id, message.reply_to_message.message_id)
+
+
+@bot.message_handler(commands=['unban', 'رفع_بن'])
+def cmd_unban(message):
+    """رفع بن کاربر با ریپلای (دستور)"""
+    chat_id = message.chat.id
+    
+    if not is_admin(chat_id, message.from_user.id): return
+    
+    if not message.reply_to_message: 
+        return bot.reply_to(message, "⚠️ **برای استفاده از دستور `/unban`، باید روی پیام کاربر مورد نظر ریپلای کنید.**", parse_mode='Markdown')
         
-    try:
-        # بن کردن دائمی کاربر
-        bot.ban_chat_member(chat_id, target_user.id)
-        bot.reply_to(message, f"🚫 کاربر **{target_user.first_name}** ({target_user.id}) با موفقیت از گروه **بن (اخراج دائم)** شد.", parse_mode='Markdown')
-        delete_msg(chat_id, message.message_id)
-    except Exception as e:
-         bot.reply_to(message, f"❌ خطا: ربات نتوانست کاربر را بن کند. (ممکن است دسترسی کافی نداشته باشد. {e})")
+    target_user = message.reply_to_message.from_user
+    delete_msg(chat_id, message.message_id) # حذف دستور
+    
+    unban_user_action(chat_id, target_user, message.from_user.id, message.reply_to_message.message_id)
 
 
 # ************************************************
