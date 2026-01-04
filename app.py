@@ -169,9 +169,6 @@ def send_log(chat_id, action, user_info, target_info=None, details=""):
 
     # Log Channel ID must be negative (for group/channel IDs)
     if log_channel_id > 0:
-        # در محیط واقعی، شما باید ID واقعی کانال لاگ را اینجا داشته باشید.
-        # اما برای دیتابیس، ID چت ذخیره شده است. 
-        # از ID ذخیره شده استفاده می‌کنیم که باید منفی باشد
         log_channel_id = chat_id 
         
     # اگر ID لاگ، ID خود چت اصلی باشد، لاگ را ارسال نمی‌کنیم تا چت شلوغ نشود.
@@ -179,9 +176,7 @@ def send_log(chat_id, action, user_info, target_info=None, details=""):
         return
         
     log_text = f"🤖 **{action}**\n"
-    # برای ساخت لینک پیام به گروه، باید از یک ترفند استفاده کنیم:
     # URL: https://t.me/c/ChannelID/MessageID 
-    # ChannelID برای گروه ها عدد chat_id بدون -100 است.
     chat_link_id = str(chat_id).replace('-100', '')
     log_text += f"🏠 گروه: [{bot.get_chat(chat_id).title}](https://t.me/c/{chat_link_id}/1)\n"
     log_text += f"👤 کاربر: {user_info}\n"
@@ -356,13 +351,13 @@ def handle_content(message):
     user_id = message.from_user.id
     settings = get_settings(chat_id)
     
-    # --- مدیریت دستورات بدون اسلش برای ادمین (بن، رفع بن، پنل) ---
+    # --- مدیریت دستورات بدون اسلش برای ادمین (بن، رفع بن، پنل، اخطار) ---
     if is_admin(chat_id, user_id): 
         text_lower = (message.text or "").lower().strip()
         
         # **FIXED: تشخیص دستور 'پنل' بدون اسلش**
         if text_lower in ['پنل', 'panel']:
-            delete_msg(chat_id, message.message_id) # حذف دستور "پنل"
+            delete_msg(chat_id, message.message_id) 
             bot.send_message(chat_id, "⚙️ **پنل اصلی تنظیمات گروه (امنیت)**", 
                              reply_markup=get_main_panel_keyboard(settings), 
                              parse_mode='Markdown')
@@ -370,6 +365,25 @@ def handle_content(message):
             
         if message.reply_to_message:
             target_user = message.reply_to_message.from_user
+            
+            # --- دستورات اخطار (Warn) بدون اسلش ---
+            if text_lower in ['اخطار', 'warn']:
+                delete_msg(chat_id, message.message_id)
+                warn_user_action(chat_id, target_user, message.reply_to_message.message_id, reason="توسط ادمین")
+                send_log(chat_id, "اعمال اخطار", f"[{message.from_user.first_name}](tg://user?id={user_id})", target_info=f"[{target_user.first_name}](tg://user?id={target_user.id})")
+                return
+
+            if text_lower in ['حذف اخطار', 'unwarn', 'حذف_اخطار']:
+                delete_msg(chat_id, message.message_id)
+                
+                current_warnings = get_user_warnings(chat_id, target_user.id)
+                if current_warnings > 0:
+                    new_warnings = current_warnings - 1
+                    set_user_warnings(chat_id, target_user.id, new_warnings)
+                    bot.send_message(chat_id, f"✅ اخطار کاربر **{target_user.first_name}** حذف شد. اخطارهای فعلی: {new_warnings}", parse_mode='Markdown', reply_to_message_id=message.reply_to_message.message_id)
+                else:
+                    bot.send_message(chat_id, f"⚠️ کاربر **{target_user.first_name}** اخطاری برای حذف ندارد.", parse_mode='Markdown', reply_to_message_id=message.reply_to_message.message_id)
+                return
             
             # دستور بن (بدون اسلش)
             if text_lower in ['بن', 'ban']:
@@ -383,15 +397,15 @@ def handle_content(message):
                 unban_user_action(chat_id, target_user, user_id, message.reply_to_message.message_id)
                 return
 
-            # دستور آزادسازی سکوت (بدون اسلش)
-            if text_lower in ['آزادسازی', 'unmute']:
+            # دستور آزادسازی سکوت (شامل 'رفع سکوت') (بدون اسلش)
+            if text_lower in ['آزادسازی', 'unmute', 'رفع سکوت']:
                 delete_msg(chat_id, message.message_id)
                 cmd_unmute_finalizer(chat_id, target_user, user_id, message.reply_to_message.message_id)
                 return
         
         return # ادمین‌ها از فیلترها معاف هستند
 
-    # --- فیلترهای ضد تخلف برای کاربران عادی ---
+    # --- فیلترهای ضد تخلف برای کاربران عادی (بقیه کدها) ---
 
     # 1. قفل سراسری چت
     if settings['chat_locked']:
@@ -437,7 +451,7 @@ def handle_content(message):
     # 6. فیلتر کلمات ممنوعه (با استفاده از Warn System)
     if settings['bad_words'] and text:
         for word in settings['bad_words']:
-            # استفاده از regex برای مطابقت دقیق کلمه (برای جلوگیری از فیلتر شدن کلماتی که فقط شامل بخش کوچکی از فحش هستند)
+            # استفاده از regex برای مطابقت دقیق کلمه 
             if re.search(r'\b' + re.escape(word) + r'\b', text, re.IGNORECASE):
                 delete_msg(chat_id, message.message_id)
                 send_log(chat_id, "حذف (کلمه ممنوعه)", f"[{message.from_user.first_name}](tg://user?id={user_id})", details=f"حاوی کلمه: {word}")
@@ -599,7 +613,7 @@ def process_new_number(message, setting_key):
     
     try:
         new_value = int(message.text.strip())
-        if new_value < 0: raise ValueError # عدد منفی مجاز نیست
+        if new_value < 0: raise ValueError 
         
         settings = get_settings(chat_id)
         settings[setting_key] = new_value
@@ -832,7 +846,7 @@ def callback_handler(call):
 
 @bot.message_handler(commands=['warn', 'unwarn', 'اخطار', 'حذف_اخطار'])
 def cmd_warn_unwarn(message):
-    """مدیریت اخطار دادن و حذف اخطار"""
+    """مدیریت اخطار دادن و حذف اخطار (با اسلش)"""
     chat_id = message.chat.id
     admin_id = message.from_user.id
     
@@ -915,9 +929,9 @@ def cmd_mute(message):
     else:
          bot.send_message(message.chat.id, "❌ خطا: ربات دسترسی محدودسازی ندارد.", reply_to_message_id=message.reply_to_message.message_id)
 
-@bot.message_handler(commands=['unmute', 'آزادسازی'])
+@bot.message_handler(commands=['unmute', 'آزادسازی', 'رفع_سکوت'])
 def cmd_unmute(message):
-    """آزادسازی کاربر با ریپلای (دستور)"""
+    """آزادسازی کاربر با ریپلای (دستور با اسلش)"""
     if not is_admin(message.chat.id, message.from_user.id) or not message.reply_to_message: return
     delete_msg(message.chat.id, message.message_id)
     target_user = message.reply_to_message.from_user
@@ -925,7 +939,7 @@ def cmd_unmute(message):
 
 @bot.message_handler(commands=['ban', 'بن'])
 def cmd_ban(message):
-    """بن کردن دائمی کاربر با ریپلای (دستور)"""
+    """بن کردن دائمی کاربر با ریپلای (دستور با اسلش)"""
     chat_id = message.chat.id
     if not is_admin(chat_id, message.from_user.id) or not message.reply_to_message: return
     delete_msg(chat_id, message.message_id)
@@ -934,7 +948,7 @@ def cmd_ban(message):
 
 @bot.message_handler(commands=['unban', 'رفع_بن'])
 def cmd_unban(message):
-    """رفع بن کاربر با ریپلای (دستور)"""
+    """رفع بن کاربر با ریپلای (دستور با اسلش)"""
     chat_id = message.chat.id
     if not is_admin(chat_id, message.from_user.id) or not message.reply_to_message: return
     delete_msg(chat_id, message.message_id)
