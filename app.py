@@ -173,79 +173,80 @@ def handle_system_msgs(message):
                         threading.Timer(settings['delete_welcome_after'], delete_msg, args=[chat_id, sent.message_id]).start()
                 except Exception: pass
 
-@bot.message_handler(func=lambda m: True, content_types=['text', 'photo', 'video', 'document', 'sticker', 'audio', 'voice', 'video_note', 'contact', 'location', 'venue', 'poll', 'dice'])
-def handle_content(message):
+# **** هندلر عمومی موقتاً برای تست غیرفعال شد ****
+# @bot.message_handler(func=lambda m: True, content_types=['text', 'photo', 'video', 'document', 'sticker', 'audio', 'voice', 'video_note', 'contact', 'location', 'venue', 'poll', 'dice'])
+# def handle_content(message):
+#     chat_id = message.chat.id
+#     user_id = message.from_user.id
     
-    chat_id = message.chat.id
-    user_id = message.from_user.id
-    
-    # ادمین‌ها مستثنی هستند
-    if is_admin(chat_id, user_id): return
+#     # ادمین‌ها مستثنی هستند
+#     if is_admin(chat_id, user_id): return
 
-    settings = get_settings(chat_id)
+#     settings = get_settings(chat_id)
 
-    # 1. قفل سراسری چت
-    if settings['chat_locked']:
-        delete_msg(chat_id, message.message_id)
-        return
+#     # 1. قفل سراسری چت
+#     if settings['chat_locked']:
+#         delete_msg(chat_id, message.message_id)
+#         return
 
-    # 2. قفل رسانه
-    media_types = ['photo', 'video', 'document', 'sticker', 'audio', 'voice', 'video_note']
-    if settings['media_locked'] and message.content_type in media_types:
-        delete_msg(chat_id, message.message_id)
-        return
+#     # 2. قفل رسانه
+#     media_types = ['photo', 'video', 'document', 'sticker', 'audio', 'voice', 'video_note']
+#     if settings['media_locked'] and message.content_type in media_types:
+#         delete_msg(chat_id, message.message_id)
+#         return
 
-    text = message.text or message.caption or ""
+#     text = message.text or message.caption or ""
 
-    # 3. ضد اسپم (Flood) و ضد تبچی
-    if settings['anti_flood_limit'] > 0:
-        now = time.time()
-        user_flood = flood_control.get(user_id, [])
-        user_flood = [t for t in user_flood if now - t < 5] # 5 ثانیه بازه زمانی
-        user_flood.append(now)
-        flood_control[user_id] = user_flood
+#     # 3. ضد اسپم (Flood) و ضد تبچی
+#     if settings['anti_flood_limit'] > 0:
+#         now = time.time()
+#         user_flood = flood_control.get(user_id, [])
+#         user_flood = [t for t in user_flood if now - t < 5] # 5 ثانیه بازه زمانی
+#         user_flood.append(now)
+#         flood_control[user_id] = user_flood
         
-        if len(user_flood) > settings['anti_flood_limit']:
-            delete_msg(chat_id, message.message_id)
-            mute_user(chat_id, user_id, 1800) # 30 دقیقه سکوت
-            #bot.send_message(chat_id, f"🚫 کاربر {message.from_user.first_name} به دلیل اسپم ساکت شد.")
-            return
+#         if len(user_flood) > settings['anti_flood_limit']:
+#             delete_msg(chat_id, message.message_id)
+#             mute_user(chat_id, user_id, 1800) # 30 دقیقه سکوت
+#             #bot.send_message(chat_id, f"🚫 کاربر {message.from_user.first_name} به دلیل اسپم ساکت شد.")
+#             return
 
-    # 4. فیلتر کلمات ممنوعه
-    if settings['bad_words'] and text:
-        for word in settings['bad_words']:
-            # استفاده از regex برای مطابقت دقیق کلمه (case insensitive)
-            if re.search(r'\b' + re.escape(word) + r'\b', text, re.IGNORECASE):
-                delete_msg(chat_id, message.message_id)
-                mute_user(chat_id, user_id, 600) # 10 دقیقه سکوت
-                return
+#     # 4. فیلتر کلمات ممنوعه
+#     if settings['bad_words'] and text:
+#         for word in settings['bad_words']:
+#             # استفاده از regex برای مطابقت دقیق کلمه (case insensitive)
+#             if re.search(r'\b' + re.escape(word) + r'\b', text, re.IGNORECASE):
+#                 delete_msg(chat_id, message.message_id)
+#                 mute_user(chat_id, user_id, 600) # 10 دقیقه سکوت
+#                 return
 
-    # 5. محدودیت کاراکتر
-    if settings['max_chars'] > 0 and len(text) > settings['max_chars']:
-        delete_msg(chat_id, message.message_id)
-        return
+#     # 5. محدودیت کاراکتر
+#     if settings['max_chars'] > 0 and len(text) > settings['max_chars']:
+#         delete_msg(chat_id, message.message_id)
+#         return
 
-    # 6. ضد لینک
-    link_regex = r'(?:https?://|www\.)[^\s<>"]+'
-    has_link = False
+#     # 6. ضد لینک
+#     link_regex = r'(?:https?://|www\.)[^\s<>"]+'
+#     has_link = False
     
-    # بررسی لینک‌های خام
-    if re.search(link_regex, text):
-        has_link = True
+#     # بررسی لینک‌های خام
+#     if re.search(link_regex, text):
+#         has_link = True
     
-    # بررسی لینک‌های مخفی (Entities)
-    if not has_link and (message.entities or message.caption_entities):
-        ents = message.entities or message.caption_entities
-        for e in ents:
-            if e.type in ['url', 'text_link']:
-                has_link = True
-                break
+#     # بررسی لینک‌های مخفی (Entities)
+#     if not has_link and (message.entities or message.caption_entities):
+#         ents = message.entities or message.caption_entities
+#         for e in ents:
+#             if e.type in ['url', 'text_link']:
+#                 has_link = True
+#                 break
     
-    if has_link:
-        delete_msg(chat_id, message.message_id)
-        if settings['mute_on_link']:
-            mute_user(chat_id, user_id, 3600) # 1 ساعت سکوت
-            #bot.send_message(chat_id, f"🚫 کاربر {message.from_user.first_name} به دلیل لینک ساکت شد.")
+#     if has_link:
+#         delete_msg(chat_id, message.message_id)
+#         if settings['mute_on_link']:
+#             mute_user(chat_id, user_id, 3600) # 1 ساعت سکوت
+#             #bot.send_message(chat_id, f"🚫 کاربر {message.from_user.first_name} به دلیل لینک ساکت شد.")
+
 
 # ************************************************
 # پنل مدیریت و دستورات (Mute/Unmute/Clean)
@@ -266,7 +267,7 @@ def get_panel_keyboard(settings):
 @bot.message_handler(commands=['panel', 'پنل'])
 def cmd_panel(message):
     """نمایش پنل مدیریتی"""
-    # **تغییر موقت برای تست:** شرط ادمین موقتاً غیرفعال شد.
+    # **تغییرات تست:** شرط ادمین غیرفعال است تا پنل برای همه باز شود و مشکل تایید شود.
     # if not is_admin(message.chat.id, message.from_user.id): return
     settings = get_settings(message.chat.id)
     bot.send_message(message.chat.id, "⚙️ **پنل تنظیمات گروه**", reply_markup=get_panel_keyboard(settings), parse_mode='Markdown')
