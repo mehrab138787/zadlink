@@ -34,13 +34,13 @@ DEFAULT_SETTINGS = {
     'delete_welcome_after': 60,
     
     # تنظیمات جدید و پیشرفته
-    'anti_forward_enabled': True,       # NEW: ضد فوروارد
-    'anti_tag_username_enabled': False, # NEW: ضد تگ/یوزرنیم
-    'remove_pin_service_msgs': True,    # NEW: حذف پیام پین کردن
-    'warn_limit': 3,                    # NEW: سقف اخطار
-    'warnings': {},                     # NEW: هشدارها {user_id: count}
-    'warn_punishment_duration': 1800,   # NEW: مدت سکوت پس از اخطار (30 دقیقه)
-    'log_channel_id': None,             # NEW: کانال گزارش‌دهی
+    'anti_forward_enabled': True,       
+    'anti_tag_username_enabled': False, 
+    'remove_pin_service_msgs': True,    
+    'warn_limit': 3,                    
+    'warnings': {},                     
+    'warn_punishment_duration': 1800,   # 30 دقیقه
+    'log_channel_id': None,             
     
     'media_locks': { 
         'photo': False,
@@ -169,14 +169,21 @@ def send_log(chat_id, action, user_info, target_info=None, details=""):
 
     # Log Channel ID must be negative (for group/channel IDs)
     if log_channel_id > 0:
-        log_channel_id = -100 # مثال: در حالت واقعی باید ID کانال مقصد باشد. در اینجا از یک ID موقت استفاده می‌شود
-
+        # در محیط واقعی، شما باید ID واقعی کانال لاگ را اینجا داشته باشید.
+        # اما برای دیتابیس، ID چت ذخیره شده است. 
+        # از ID ذخیره شده استفاده می‌کنیم که باید منفی باشد
+        log_channel_id = chat_id 
+        
     # اگر ID لاگ، ID خود چت اصلی باشد، لاگ را ارسال نمی‌کنیم تا چت شلوغ نشود.
     if log_channel_id == chat_id:
         return
         
     log_text = f"🤖 **{action}**\n"
-    log_text += f"🏠 گروه: [{bot.get_chat(chat_id).title}](https://t.me/c/{str(chat_id).replace('-100', '')}/1)\n"
+    # برای ساخت لینک پیام به گروه، باید از یک ترفند استفاده کنیم:
+    # URL: https://t.me/c/ChannelID/MessageID 
+    # ChannelID برای گروه ها عدد chat_id بدون -100 است.
+    chat_link_id = str(chat_id).replace('-100', '')
+    log_text += f"🏠 گروه: [{bot.get_chat(chat_id).title}](https://t.me/c/{chat_link_id}/1)\n"
     log_text += f"👤 کاربر: {user_info}\n"
     if target_info:
         log_text += f"🎯 هدف: {target_info}\n"
@@ -316,7 +323,7 @@ def handle_system_msgs(message):
         if settings['remove_system_msgs']:
             delete_msg(chat_id, message.message_id)
 
-    # 2. حذف پیام‌های پین کردن (NEW)
+    # 2. حذف پیام‌های پین کردن
     if message.content_type == 'pinned_message':
         if settings.get('remove_pin_service_msgs', True):
             delete_msg(chat_id, message.message_id)
@@ -327,6 +334,7 @@ def handle_system_msgs(message):
             if user.id == bot.get_me().id: continue
             
             if settings['anti_tabchi_enabled']:
+                # Reset anti-flood for new user
                 flood_control[user.id] = [] 
 
             if settings['welcome_msg']:
@@ -335,7 +343,7 @@ def handle_system_msgs(message):
                 try:
                     sent = bot.send_message(chat_id, text, parse_mode='Markdown')
                     
-                    delete_after = settings.get('delete_welcome_after', 60) # NEW: استفاده از تنظیم قابل تغییر
+                    delete_after = settings.get('delete_welcome_after', 60) 
                     if delete_after > 0:
                         threading.Timer(delete_after, delete_msg, args=[chat_id, sent.message_id]).start()
                 except Exception: pass
@@ -351,6 +359,15 @@ def handle_content(message):
     # --- مدیریت دستورات بدون اسلش برای ادمین (بن، رفع بن، پنل) ---
     if is_admin(chat_id, user_id): 
         text_lower = (message.text or "").lower().strip()
+        
+        # **FIXED: تشخیص دستور 'پنل' بدون اسلش**
+        if text_lower in ['پنل', 'panel']:
+            delete_msg(chat_id, message.message_id) # حذف دستور "پنل"
+            bot.send_message(chat_id, "⚙️ **پنل اصلی تنظیمات گروه (امنیت)**", 
+                             reply_markup=get_main_panel_keyboard(settings), 
+                             parse_mode='Markdown')
+            return
+            
         if message.reply_to_message:
             target_user = message.reply_to_message.from_user
             
@@ -389,13 +406,13 @@ def handle_content(message):
 
     text = message.text or message.caption or ""
     
-    # 3. ضد فوروارد (NEW)
+    # 3. ضد فوروارد
     if settings.get('anti_forward_enabled') and (message.forward_from or message.forward_from_chat):
         delete_msg(chat_id, message.message_id)
         send_log(chat_id, "حذف (فوروارد)", f"[{message.from_user.first_name}](tg://user?id={user_id})", details="پیام فوروارد شده حذف شد.")
         return
 
-    # 4. ضد یوزرنیم و تگ (NEW)
+    # 4. ضد یوزرنیم و تگ 
     if settings.get('anti_tag_username_enabled') and text:
         tag_username_regex = r'(@\w+)|(t\.me/\w+)'
         if re.search(tag_username_regex, text) or (message.entities and any(e.type == 'text_mention' for e in message.entities)):
@@ -417,9 +434,10 @@ def handle_content(message):
             send_log(chat_id, "محدودیت (Flood)", f"[{message.from_user.first_name}](tg://user?id={user_id})", details="ارسال بیش از حد پیام")
             return
 
-    # 6. فیلتر کلمات ممنوعه (IMPROVED to use Warn System)
+    # 6. فیلتر کلمات ممنوعه (با استفاده از Warn System)
     if settings['bad_words'] and text:
         for word in settings['bad_words']:
+            # استفاده از regex برای مطابقت دقیق کلمه (برای جلوگیری از فیلتر شدن کلماتی که فقط شامل بخش کوچکی از فحش هستند)
             if re.search(r'\b' + re.escape(word) + r'\b', text, re.IGNORECASE):
                 delete_msg(chat_id, message.message_id)
                 send_log(chat_id, "حذف (کلمه ممنوعه)", f"[{message.from_user.first_name}](tg://user?id={user_id})", details=f"حاوی کلمه: {word}")
@@ -586,7 +604,7 @@ def process_new_number(message, setting_key):
         settings = get_settings(chat_id)
         settings[setting_key] = new_value
         
-        # اگر سقف اخطار عوض شود، اخطارهای فعلی کاربران را صفر می‌کنیم تا سردرگمی ایجاد نشود
+        # اگر سقف اخطار عوض شود، اخطارهای فعلی کاربران را صفر می‌کنیم 
         if setting_key == 'warn_limit':
              settings['warnings'] = {}
              bot.send_message(chat_id, "⚠️ **تعداد اخطارهای کاربران صفر شد** تا با سقف جدید هماهنگ باشد.", parse_mode='Markdown')
@@ -693,13 +711,7 @@ def start_management_process(call, action_type):
         reply_markup=markup
     )
     
-# --- هندلر دستور پنل (شامل حالت بدون اسلش) ---
-
-@bot.message_handler(func=lambda m: m.text and m.text.lower().strip() in ['پنل', 'panel'], 
-                     content_types=['text'])
-def cmd_panel_no_slash(message):
-    """باز کردن پنل با کلمه "پنل" بدون اسلش"""
-    cmd_panel(message)
+# --- هندلر دستور پنل (با اسلش) ---
 
 @bot.message_handler(commands=['panel', 'پنل'])
 def cmd_panel(message):
@@ -862,11 +874,6 @@ def cmd_set_log(message):
     command = message.text.split()[0].lower().replace('/', '')
     
     if command in ['setlog', 'تنظیم_لاگ']:
-        # استفاده از chat_id کنونی به عنوان log_channel_id (اگر ادمین ربات در کانال باشد)
-        # توجه: در محیط واقعی، بهتر است کانال لاگ یک کانال کاملا خصوصی باشد. 
-        # برای سادگی، فعلاً فرض می‌کنیم ID چت مقصد را وارد می‌کند.
-        
-        # برای کانال لاگ باید یک ID منفی ذخیره شود.
         settings['log_channel_id'] = chat_id 
         save_settings(chat_id, settings)
         bot.send_message(chat_id, "✅ **کانال گزارش‌دهی (Log Channel) روی این گروه تنظیم شد.** لطفا ربات را در این چت، مدیر کنید.", parse_mode='Markdown')
@@ -900,7 +907,7 @@ def cmd_mute(message):
     if not is_admin(message.chat.id, message.from_user.id) or not message.reply_to_message: return
     delete_msg(message.chat.id, message.message_id)
     target_user = message.reply_to_message.from_user
-    mute_duration = 86400
+    mute_duration = 86400 # 24 ساعت
     
     if mute_user(message.chat.id, target_user.id, mute_duration):
         bot.send_message(message.chat.id, f"🚫 کاربر **{target_user.first_name}** با موفقیت ساکت شد.", parse_mode='Markdown', reply_to_message_id=message.reply_to_message.message_id)
@@ -952,7 +959,7 @@ def getMessage():
 
 @app.route("/")
 def webhook():
-    """تنظیم Webhook برای تلگرام (وقتی برای اولین بار آدرس باز شود)"""
+    """تنظیم Webhook برای تلگرام"""
     bot.remove_webhook()
     
     webhook_url = f"https://{WEBHOOK_HOST}/{API_TOKEN}" if WEBHOOK_HOST else None
